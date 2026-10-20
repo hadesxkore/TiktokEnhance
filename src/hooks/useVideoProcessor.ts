@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
-import { uploadToCloudinary } from '../lib/cloudinary'
+import { uploadToCloudinary, buildTransformedUrl } from '../lib/cloudinary'
 import { useVideoStore } from '../store/videoStore'
 
 export interface OptimizeOptions {
@@ -56,15 +56,25 @@ export function useVideoProcessor() {
 
         const eager = buildEager(options)
 
-        const result = await uploadToCloudinary(
-          file,
-          file.name,
-          (pct) => { updateJob(id, { progress: 3 + Math.round(pct * 0.94) }) },
-          { eager }
-        )
+        let result
+        try {
+          result = await uploadToCloudinary(
+            file,
+            file.name,
+            (pct) => { updateJob(id, { progress: 3 + Math.round(pct * 0.94) }) },
+            { eager }
+          )
+        } catch {
+          // Fallback to direct upload without eager if preset denies eager or network dropped
+          result = await uploadToCloudinary(
+            file,
+            file.name,
+            (pct) => { updateJob(id, { progress: 3 + Math.round(pct * 0.94) }) }
+          )
+        }
 
-        // Prefer the eager (optimized/re-encoded) URL — that's the TikTok-ready version
-        const optimizedUrl   = result.eager?.[0]?.secure_url ?? result.secure_url
+        // Prefer eager result URL or dynamic on-the-fly transformation URL
+        const optimizedUrl   = result.eager?.[0]?.secure_url ?? buildTransformedUrl(result.secure_url, eager)
         const optimizedBytes = result.eager?.[0]?.bytes ?? result.bytes
 
         const finalJob = {
