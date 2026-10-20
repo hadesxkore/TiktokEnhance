@@ -51,16 +51,12 @@ export async function uploadToCloudinary(
   const formData = new FormData()
   formData.append('file', file, filename)
   formData.append('upload_preset', UPLOAD_PRESET)
-  formData.append('resource_type', 'video')
-  formData.append('folder', 'tiktok-optimizer')
 
-  // Note: We avoid blocking synchronous eager transformations on the upload request
-  // because unsigned presets often disallow eager or timeout on mobile networks.
-  // Instead, buildTransformedUrl provides dynamic, on-demand transformation URLs.
-  if (options?.eager) {
-    formData.append('eager', options.eager)
-    formData.append('eager_async', 'true') // non-blocking background processing
-  }
+  // NOTE: We deliberately do NOT send 'eager' in the upload POST body.
+  // Sending 'eager' makes Cloudinary stall the HTTP response while transcoding
+  // the entire video synchronously. On videos longer than 15-20s, this causes
+  // mobile carriers and browsers to drop the connection with a Network Error!
+  // Instead, buildTransformedUrl provides on-demand CDN delivery transformation.
 
   const url = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`
 
@@ -76,13 +72,35 @@ export async function uploadToCloudinary(
 
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText))
+        try {
+          resolve(JSON.parse(xhr.responseText))
+        } catch {
+          reject(new Error('Invalid JSON response received from Cloudinary.'))
+        }
       } else {
-        reject(new Error('Cloudinary upload failed: ' + xhr.status + ' ' + xhr.responseText))
+        let errorMsg = `Cloudinary returned HTTP ${xhr.status}`
+        try {
+          const res = JSON.parse(xhr.responseText)
+          if (res.error?.message) {
+            errorMsg = res.error.message
+          }
+        } catch {
+          if (xhr.responseText) errorMsg += `: ${xhr.responseText.slice(0, 150)}`
+        }
+        reject(new Error(errorMsg))
       }
     }
 
-    xhr.onerror = () => reject(new Error('Network error during Cloudinary upload'))
+    xhr.onerror = () => {
+      // Diagnostic check for common causes:
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
+      reject(
+        new Error(
+          `Cloudinary network connection failed (${sizeMB}MB). Common causes: file exceeds upload preset limit, unstable mobile connection, or Cloudinary blocked the request.`
+        )
+      )
+    }
+
     xhr.send(formData)
   })
 }

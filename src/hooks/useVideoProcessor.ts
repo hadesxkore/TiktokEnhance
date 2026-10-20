@@ -56,26 +56,15 @@ export function useVideoProcessor() {
 
         const eager = buildEager(options)
 
-        let result
-        try {
-          result = await uploadToCloudinary(
-            file,
-            file.name,
-            (pct) => { updateJob(id, { progress: 3 + Math.round(pct * 0.94) }) },
-            { eager }
-          )
-        } catch {
-          // Fallback to direct upload without eager if preset denies eager or network dropped
-          result = await uploadToCloudinary(
-            file,
-            file.name,
-            (pct) => { updateJob(id, { progress: 3 + Math.round(pct * 0.94) }) }
-          )
-        }
+        const result = await uploadToCloudinary(
+          file,
+          file.name,
+          (pct) => { updateJob(id, { progress: 3 + Math.round(pct * 0.94) }) }
+        )
 
-        // Prefer eager result URL or dynamic on-the-fly transformation URL
-        const optimizedUrl   = result.eager?.[0]?.secure_url ?? buildTransformedUrl(result.secure_url, eager)
-        const optimizedBytes = result.eager?.[0]?.bytes ?? result.bytes
+        // Build the optimized TikTok URL via Cloudinary dynamic transformation
+        const optimizedUrl   = buildTransformedUrl(result.secure_url, eager)
+        const optimizedBytes = result.bytes
 
         const finalJob = {
           ...useVideoStore.getState().jobs.find((j) => j.id === id)!,
@@ -95,11 +84,13 @@ export function useVideoProcessor() {
         })
 
         await saveToFirestore(finalJob)
+        return id
       } catch (err: unknown) {
         updateJob(id, {
           status: 'error',
           error: err instanceof Error ? err.message : 'Upload failed',
         })
+        return id
       }
     },
     [addJob, updateJob, saveToFirestore]
