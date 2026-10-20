@@ -14,7 +14,9 @@ import {
   CheckmarkCircle01Icon,
   Copy01Icon,
   Loading03Icon,
+  Download01Icon,
 } from '@hugeicons/core-free-icons'
+import { getDownloadUrl } from '../lib/cloudinary'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -296,10 +298,27 @@ export function UploadPage() {
               <Button
                 size="sm"
                 className="gap-2 text-xs flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium"
+                onClick={() => {
+                  const downloadUrl = getDownloadUrl(activeJob.cloudinaryUrl!, `tiktok_${activeJob.filename}`)
+                  const a = document.createElement('a')
+                  a.href = downloadUrl
+                  a.setAttribute('download', `tiktok_${activeJob.filename}`)
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                }}
+              >
+                <HugeiconsIcon icon={Download01Icon} size={14} />
+                Download Video
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-xs flex-1 font-medium"
                 onClick={() => handleCopyUrl(activeJob.cloudinaryUrl!)}
               >
                 <HugeiconsIcon icon={copied ? Tick01Icon : Copy01Icon} size={14} />
-                {copied ? 'Copied to Clipboard!' : 'Copy TikTok Video URL'}
+                {copied ? 'Copied!' : 'Copy URL'}
               </Button>
               <Link to="/videos" className="flex-1">
                 <Button variant="outline" size="sm" className="w-full text-xs">

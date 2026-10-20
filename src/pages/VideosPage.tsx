@@ -11,6 +11,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { useVideoStore } from '../store/videoStore'
 import type { VideoJob } from '../store/videoStore'
+import { getDownloadUrl } from '../lib/cloudinary'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -49,10 +50,13 @@ function VideoCard({ job }: { job: VideoJob }) {
 
   const download = () => {
     if (!job.cloudinaryUrl) return
+    const downloadUrl = getDownloadUrl(job.cloudinaryUrl, `tiktok_${job.filename}`)
     const a = document.createElement('a')
-    a.href = job.cloudinaryUrl
-    a.download = job.filename
+    a.href = downloadUrl
+    a.setAttribute('download', `tiktok_${job.filename}`)
+    document.body.appendChild(a)
     a.click()
+    document.body.removeChild(a)
   }
 
   const copyUrl = async () => {

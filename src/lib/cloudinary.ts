@@ -42,6 +42,21 @@ export function buildTransformedUrl(secureUrl: string, transformString?: string)
   return `${secureUrl.slice(0, idx + needle.length)}${cleanTransform}/${secureUrl.slice(idx + needle.length)}`
 }
 
+/**
+ * Converts any Cloudinary video URL into a direct-download URL with Content-Disposition: attachment.
+ * This forces iOS/Android/PC browsers to save the video file directly to the device storage
+ * instead of opening the boring black HTML5 browser video player.
+ */
+export function getDownloadUrl(url: string, filename = 'tiktok_enhanced'): string {
+  if (!url) return url
+  const cleanName = filename.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
+  const needle = '/video/upload/'
+  const idx = url.indexOf(needle)
+  if (idx === -1) return url
+
+  return `${url.slice(0, idx + needle.length)}fl_attachment:${cleanName}/${url.slice(idx + needle.length)}`
+}
+
 const CHUNK_SIZE = 6 * 1024 * 1024 // 6 MB (Cloudinary requires >= 5MB per chunk)
 
 /**
