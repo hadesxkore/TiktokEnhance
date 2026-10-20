@@ -1,0 +1,9 @@
+/* App.css - legacy styles cleaned up, now using Tailwind + shadcn */
+
+/* Spin animation for loading icons */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
