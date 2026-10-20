@@ -42,21 +42,102 @@ export function buildTransformedUrl(secureUrl: string, transformString?: string)
   return `${secureUrl.slice(0, idx + needle.length)}${cleanTransform}/${secureUrl.slice(idx + needle.length)}`
 }
 
+const CHUNK_SIZE = 6 * 1024 * 1024 // 6 MB (Cloudinary requires >= 5MB per chunk)
+
+/**
+ * Uploads large videos (e.g. 100MB - 500MB+) in 6MB chunks.
+ * Bypasses Cloudinary's 100MB single-request limit and avoids mobile socket timeouts.
+ */
+async function uploadChunked(
+  file: Blob | File,
+  filename: string,
+  onProgress?: (pct: number) => void
+): Promise<CloudinaryUploadResult> {
+  const totalBytes = file.size
+  const uniqueUploadId = 'cld_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10)
+  const url = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`
+
+  let start = 0
+  let lastResult: CloudinaryUploadResult | null = null
+
+  while (start < totalBytes) {
+    const end = Math.min(start + CHUNK_SIZE, totalBytes)
+    const chunk = file.slice(start, end)
+    const contentRange = `bytes ${start}-${end - 1}/${totalBytes}`
+
+    const formData = new FormData()
+    formData.append('file', chunk, filename)
+    formData.append('upload_preset', UPLOAD_PRESET)
+
+    const chunkResult = await new Promise<CloudinaryUploadResult>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', url)
+      xhr.setRequestHeader('X-Unique-Upload-Id', uniqueUploadId)
+      xhr.setRequestHeader('Content-Range', contentRange)
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          const currentTotalLoaded = start + e.loaded
+          onProgress(Math.min(98, Math.round((currentTotalLoaded / totalBytes) * 100)))
+        }
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText))
+          } catch {
+            reject(new Error('Invalid response received from Cloudinary chunk.'))
+          }
+        } else {
+          let errorMsg = `Cloudinary chunk failed (HTTP ${xhr.status})`
+          try {
+            const res = JSON.parse(xhr.responseText)
+            if (res.error?.message) errorMsg = res.error.message
+          } catch {
+            if (xhr.responseText) errorMsg += `: ${xhr.responseText.slice(0, 150)}`
+          }
+          reject(new Error(errorMsg))
+        }
+      }
+
+      xhr.onerror = () => {
+        reject(
+          new Error(
+            `Connection lost during chunk upload (${(start / (1024 * 1024)).toFixed(0)}MB / ${(totalBytes / (1024 * 1024)).toFixed(0)}MB). Check mobile data / Wi-Fi.`
+          )
+        )
+      }
+
+      xhr.send(formData)
+    })
+
+    lastResult = chunkResult
+    start = end
+    if (onProgress) onProgress(Math.min(98, Math.round((start / totalBytes) * 100)))
+  }
+
+  if (!lastResult || !lastResult.secure_url) {
+    throw new Error('Chunked upload completed, but Cloudinary did not return a video URL.')
+  }
+
+  return lastResult
+}
+
 export async function uploadToCloudinary(
   file: Blob | File,
   filename: string,
   onProgress?: (pct: number) => void,
   options?: UploadOptions
 ): Promise<CloudinaryUploadResult> {
+  // If video is larger than 20MB, automatically use Chunked Upload to bypass Cloudinary's 100MB limit
+  if (file.size > 20 * 1024 * 1024) {
+    return uploadChunked(file, filename, onProgress)
+  }
+
   const formData = new FormData()
   formData.append('file', file, filename)
   formData.append('upload_preset', UPLOAD_PRESET)
-
-  // NOTE: We deliberately do NOT send 'eager' in the upload POST body.
-  // Sending 'eager' makes Cloudinary stall the HTTP response while transcoding
-  // the entire video synchronously. On videos longer than 15-20s, this causes
-  // mobile carriers and browsers to drop the connection with a Network Error!
-  // Instead, buildTransformedUrl provides on-demand CDN delivery transformation.
 
   const url = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`
 
@@ -92,11 +173,10 @@ export async function uploadToCloudinary(
     }
 
     xhr.onerror = () => {
-      // Diagnostic check for common causes:
       const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
       reject(
         new Error(
-          `Cloudinary network connection failed (${sizeMB}MB). Common causes: file exceeds upload preset limit, unstable mobile connection, or Cloudinary blocked the request.`
+          `Cloudinary network connection failed (${sizeMB}MB). Common causes: unstable mobile connection or timeout.`
         )
       )
     }
